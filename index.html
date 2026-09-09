@@ -71,7 +71,7 @@
 function initGame() {
     const canvas = document.getElementById('gameCanvas');
     const startScreen = document.getElementById('startScreen');
-    const htmlBgm = document.getElementById('bgm');
+    const bgm = document.getElementById('bgm');
     const container = document.getElementById('gameContainer');
 
     if (!canvas) return;
@@ -84,109 +84,6 @@ function initGame() {
     canvas.height = GAME_HEIGHT;
 
     let audioCtx = null;
-    let bgmBuffer = null;
-    let bgmSourceNode = null;
-    let bgmGainNode = null;
-    let isWebAudioBgmPlaying = false;
-
-    function initAudioContext() {
-        try {
-            if (!audioCtx) {
-                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                if (AudioContextClass) audioCtx = new AudioContextClass();
-            }
-            if (audioCtx && audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-        } catch(e) {}
-    }
-
-    function loadBgmBuffer() {
-        initAudioContext();
-        if (!audioCtx || bgmBuffer) return;
-
-        const sources = ['images/bgm.mp3', 'bgm.mp3', './images/bgm.mp3'];
-        
-        function tryFetch(idx) {
-            if (idx >= sources.length) return;
-            fetch(sources[idx])
-                .then(response => response.arrayBuffer())
-                .then(arrayBuffer => audioCtx.decodeAudioData(arrayBuffer))
-                .then(decodedData => {
-                    bgmBuffer = decodedData;
-                    if (gameStarted && !gameOver && !isWebAudioBgmPlaying) {
-                        playWebAudioBgm();
-                    }
-                })
-                .catch(err => {
-                    tryFetch(idx + 1);
-                });
-        }
-        tryFetch(0);
-    }
-
-    function playWebAudioBgm() {
-        initAudioContext();
-        if (!audioCtx) return;
-
-        if (bgmBuffer) {
-            stopWebAudioBgm();
-            try {
-                bgmSourceNode = audioCtx.createBufferSource();
-                bgmSourceNode.buffer = bgmBuffer;
-                bgmSourceNode.loop = true;
-
-                bgmGainNode = audioCtx.createGain();
-                bgmGainNode.gain.value = 0.4;
-
-                bgmSourceNode.connect(bgmGainNode);
-                bgmGainNode.connect(audioCtx.destination);
-
-                bgmSourceNode.start(0);
-                isWebAudioBgmPlaying = true;
-                return;
-            } catch(e) {}
-        }
-
-        if (htmlBgm) {
-            htmlBgm.volume = 0.4;
-            htmlBgm.play().catch(() => {});
-        }
-    }
-
-    function stopWebAudioBgm() {
-        if (bgmSourceNode) {
-            try { bgmSourceNode.stop(); } catch(e) {}
-            bgmSourceNode = null;
-        }
-        isWebAudioBgmPlaying = false;
-        if (htmlBgm && !htmlBgm.paused) {
-            try { htmlBgm.pause(); } catch(e) {}
-        }
-    }
-
-    function startBGM() {
-        initAudioContext();
-        loadBgmBuffer();
-        playWebAudioBgm();
-    }
-
-    function stopBGM() {
-        stopWebAudioBgm();
-    }
-
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            stopBGM();
-        } else if (gameStarted && !gameOver) {
-            startBGM();
-        }
-    });
-
-    window.addEventListener('blur', stopBGM);
-    window.addEventListener('focus', () => {
-        if (gameStarted && !gameOver) startBGM();
-    });
 
     function loadRobustImage(baseName) {
         const img = new Image();
@@ -215,6 +112,59 @@ function initGame() {
     const bgImg3 = loadRobustImage('bg_3');
 
     let currentBgImg = bgImg1;
+
+    function initAudioContext() {
+        try {
+            if (!audioCtx) {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioContextClass) audioCtx = new AudioContextClass();
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        } catch(e) {}
+    }
+
+    function startBGM() {
+        initAudioContext();
+        if (!bgm) return;
+        bgm.volume = 0.45;
+        
+        try {
+            bgm.currentTime = 0;
+            const playPromise = bgm.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(() => {
+                    const unlock = () => {
+                        bgm.play().catch(() => {});
+                        window.removeEventListener('pointerdown', unlock);
+                        window.removeEventListener('touchstart', unlock);
+                    };
+                    window.addEventListener('pointerdown', unlock, { once: true });
+                    window.addEventListener('touchstart', unlock, { once: true });
+                });
+            }
+        } catch(e) {}
+    }
+
+    function stopBGM() {
+        if (bgm && !bgm.paused) {
+            try { bgm.pause(); } catch(e) {}
+        }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopBGM();
+        } else if (gameStarted && !gameOver) {
+            if (bgm && bgm.paused) bgm.play().catch(() => {});
+        }
+    });
+
+    window.addEventListener('blur', stopBGM);
+    window.addEventListener('focus', () => {
+        if (gameStarted && !gameOver && bgm && bgm.paused) bgm.play().catch(() => {});
+    });
 
     let score = 0;
     let lives = 3;
@@ -672,8 +622,8 @@ function initGame() {
             return;
         }
 
-        if (!isWebAudioBgmPlaying) {
-            playWebAudioBgm();
+        if (bgm && bgm.paused) {
+            bgm.play().catch(() => {});
         }
 
         playSound('slash');
@@ -726,7 +676,6 @@ function initGame() {
 
             if (item.type === 'tomato') {
                 playSound('hit');
-                // 💡 分數放大 10 倍 (原本 10/20/30 -> 變成 100/200/300)
                 const addedScore = 100 * multiplier;
                 score += addedScore;
 
@@ -758,7 +707,6 @@ function initGame() {
                 slicedPieces.push(new Piece(item.x, item.y, false, '#d50000'));
             } else if (item.type === 'golden_tomato') {
                 playSound('heal');
-                // 💡 黃金蕃茄分數放大 10 倍 (原本 30/60/90 -> 變成 300/600/900)
                 const addedScore = 300 * multiplier;
                 score += addedScore;
                 if (lives < maxLives) lives++;
@@ -828,7 +776,6 @@ function initGame() {
     function drawUI() {
         if (!gameStarted) return;
 
-        // 加寬分數顯示框，避免 10 倍分數後字體被擠壓
         drawPixelBox(20, 20, 260, 50, '#111111', '#ffffff', '#000000', 4);
         drawPixelText(`SCORE: ${score}`, 150, 52, '#ffffff', 22, 'center');
 
